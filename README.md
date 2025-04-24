@@ -1,5 +1,6 @@
 # Intro
-This file has instructions for how to opporate weekly report_generator.ipynb and its associated notebooks.
+By Avery Kiihne
+This file has instructions for how to opporate weekly report_generator.ipynb and its associated notebooks. This was originally stored at https://gitlab.gfdl.noaa.gov/Avery.Kiihne/weekly-epmt-report and has been moved here for record keeping
 
 # Concept
 The weekly report is designed to be a way to look at the health and function of the EPMT database over a period of time. 
