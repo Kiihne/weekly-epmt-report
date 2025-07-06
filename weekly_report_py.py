@@ -24,7 +24,7 @@ import time
 import pickle   #to load in metrics history
 pandas.set_option('display.max_columns', None)
 #number of days behind recorder is. Important to let jobs finish
-off_set_days = 4    #number of days delayed the query is. This allows for job completion and an easier query
+off_set_days = 5    #number of days delayed the query is. This allows for job completion and an easier query
 
 ###############
 # Second cell
@@ -40,8 +40,8 @@ filename = 'weekly_metric_history_DO_NOT_DELETE.pkl'
 # Read dictionary pkl file
 with open(filename, 'rb') as fp:
     metrics_history = pickle.load(fp)
-if current_date in metrics_history['date']:
-    sys.exit(['date already recorded'])
+#if current_date in metrics_history['date']:
+#    sys.exit(['date already recorded'])
     
 
 #query for data of the last week from exactly this moment
@@ -85,9 +85,12 @@ for ff in range(len(metric_list)):
     for job_instance in range(len(all_jobs)):
         #to track progress of secondary post processing for neccesary jobs
         if (job_instance+1) % 1000 == 0 and metric == 'rchar':
-            print((job_instance/len(all_jobs)*100), '% at ', (time.time()-start)/60, 'minutes')
+            print(int(job_instance/len(all_jobs)*100), '% at ', (time.time()-start)/60, 'minutes')
         if all_jobs[job_instance].get(metric) == None:    #If job does not have all data, it finds that job and processes it through a new query
-            all_jobs[job_instance] = eq.get_jobs(jobs = all_jobs[job_instance]['jobid'], fmt = 'dict',  trigger_post_process = True)[0]  
+            try:
+                all_jobs[job_instance] = eq.get_jobs(jobs = all_jobs[job_instance]['jobid'], fmt = 'dict',  trigger_post_process = True)[0]  
+            except:
+                continue
         #double check secondary query was succesful
         if all_jobs[job_instance].get(metric) == None:
             continue
@@ -112,6 +115,7 @@ ax[9].set_ylabel('counts', fontsize = 20)
 ax[18].set_ylabel('counts', fontsize = 20)
 plt.suptitle('Master Histogram '+chosen_date, fontsize = 60)
 plt.savefig('report_directory/weekly_report_'+chosen_date+'/master_hist_'+chosen_date+'.pdf', bbox_inches='tight', format = 'pdf')
+
 ###############
 # fifth cell
 ###############
@@ -161,7 +165,7 @@ for bb in range(len(num_jobs_ranking)):   #make keys fro score dictionary
 final_rank = sorted(final_rank) #top users at beginning of list 
 
 # Data to plot
-num_users = 15   #number of users that appears in chart
+num_users = 10   #number of users that appears in chart
 labels = []
 sizes = []
 #creat lists with order based on final score
@@ -250,7 +254,57 @@ for ii in range(len(pp_nodes_short)):
         separated_node_data['three'][0].append(pp_nodes_short[ii])
         separated_node_data['three'][1].append(flow_avg_pp[ii])
         separated_node_data['three'][2].append(flow_err_pp[ii])
+##################################################################################
+#subsection: call historical data for each node and calculate the values needed to display with errorbars
+#add in percentiles row. need to call history and find percentile of weeks metric
+filename = '../hpc_health_report/weekly_node_flow_history_DO_NOT_DELETE.pkl'
+# Read dictionary pkl file
+with open(filename, 'rb') as fp:
+    node_history = pickle.load(fp)
+del node_history['date']     #remove dates as to leave only variables that are being used
+#manipulate the historical dat flow rate for each node into somwthing usable
+#Average and error calculations for each node
+historical_flow_avg_pp = []
+historical_flow_err_pp = []
 
+#due to nodes being added in the future this code block exists as an edge case.
+bad_nodes = []
+for node in pp_nodes_short:
+    if node not in node_history.keys():
+        bad_nodes.append(node)
+for node in bad_nodes:
+    pp_nodes_short.remove(node)
+
+#extract historical data
+for node_name in pp_nodes_short:
+    node_history[node_name] = [x for x in node_history[node_name] if x is not None] 
+    historical_flow_avg_pp.append(sum(node_history[node_name])/len(node_history[node_name]))
+    historical_flow_err_pp.append(np.std(node_history[node_name])/(len(node_history[node_name]))**.5)
+
+
+#setup dictionaries
+historical_separated_node_data = {}
+historical_separated_node_data['zero'] = [],[],[]   #[node name], [value], [error]
+historical_separated_node_data['one_two'] = [],[],[]
+historical_separated_node_data['three'] = [],[],[]
+node_categories = ['zero','one_two','three']
+#separate nodes by first number, as that correlates to hardware
+for ii in range(len(pp_nodes_short)):
+    node = pp_nodes_short[ii]
+    if node in node_history.keys():
+        if node[0] == '0':
+            historical_separated_node_data['zero'][0].append(pp_nodes_short[ii])
+            historical_separated_node_data['zero'][1].append(historical_flow_avg_pp[ii])
+            historical_separated_node_data['zero'][2].append(historical_flow_err_pp[ii])
+        if node[0] == '1' or node[0] == '2':
+            historical_separated_node_data['one_two'][0].append(pp_nodes_short[ii])
+            historical_separated_node_data['one_two'][1].append(historical_flow_avg_pp[ii])
+            historical_separated_node_data['one_two'][2].append(historical_flow_err_pp[ii])
+        if node[0] == '3':
+            historical_separated_node_data['three'][0].append(pp_nodes_short[ii])
+            historical_separated_node_data['three'][1].append(historical_flow_avg_pp[ii])
+            historical_separated_node_data['three'][2].append(historical_flow_err_pp[ii])
+##################################################################################
 #make subplots breaking up long plot
 plt.style.use('default')
 fig, ax = plt.subplots(nrows=3,ncols=1,figsize=(18,9), sharex = 'none', sharey = 'all', gridspec_kw={'hspace': .35,'wspace':.05})
@@ -259,11 +313,13 @@ plt.suptitle('average data flow rate ((read+write bytes)/CPU time) for PP nodes'
 
 for aa in range(3):
     node_key = node_categories[aa]
-    ax[aa].bar(separated_node_data[node_key][0],separated_node_data[node_key][1], yerr = separated_node_data[node_key][2], label = 'flow', color = 'darkorchid')
+    ax[aa].bar(separated_node_data[node_key][0],separated_node_data[node_key][1], yerr = separated_node_data[node_key][2], color = 'darkorchid', label = 'this week average + errorbar')
     ax[aa].set_xticklabels(separated_node_data[node_key][0], rotation=90)
+    ax[aa].errorbar(historical_separated_node_data[node_key][0],historical_separated_node_data[node_key][1],yerr = historical_separated_node_data[node_key][2], color = 'red',fmt="o", markersize = 3, label = 'all time average + errorbar')
     ax[aa].set_ylabel('average data flow rate', fontsize = 15)
 #bells n whistles
 plt.xlabel('pp Job node', fontsize = 15)
+ax[0].legend()
 
 plt.tight_layout
 plt.show()
@@ -274,7 +330,7 @@ z = 0
 nodes_dictionary = {}
 for node in pp_nodes_short:
     nodes_dictionary[node] = [flow_avg_pp[z]]
-    z +=1
+    z += 1
 
 
 #eventually will use data to predict relative health of varous nodes. But first We need to build up those records
@@ -283,22 +339,21 @@ filename = 'weekly_node_flow_history_DO_NOT_DELETE.pkl'
 with open(filename, 'rb') as fp:
     nodes_history = pickle.load(fp)
     
-#due to nodes being added in the future this code block exists as an edge case. when a node is added 
-for node in pp_nodes_short:
-    if node in nodes_history.keys():
-        continue
-    else:
-        nodes_history[node] = len(nodes_history['016'])*[None]   #if node does not exist in list, then give it all zeros with an established
 
 #record new dates
 if chosen_date not in nodes_history['date']:
     for node in pp_nodes_short:
-       nodes_history[node].append(nodes_dictionary[node][0])
+        nodes_history[node].append(nodes_dictionary[node][0])
+    for node in bad_nodes:
+        nodes_history[node] = (len(node_history['016'])-1)*[None]   #if node does not exist in list, then give it all zeros with an established
+        nodes_history[node].append((sum(flow_avg_dict[f'pp{node}'])/len(flow_avg_dict[f'pp{node}'])))
+        
     nodes_history['date'].append(chosen_date)
 # save dictionary to weekly_metric_storage_DO_NOT_DELETE.pkl file
 with open(filename, 'wb') as fp:
     pickle.dump(nodes_history, fp)
     print('nodes dictionary saved successfully to file')
+
 
 ###############
 # Seventh cell
@@ -339,7 +394,7 @@ for i in summed_metric_list:
         summed_metric_dict[i][2] = 'VERY HIGH'
     
 #some metrics need to have relative column based on averages instead total. we replace those values here
-average_metric_list = ['rssmax', 'data_flow_rate']
+average_metric_list = ['rssmax']
 for i in average_metric_list:
     current_week_metric_percentile = stats.percentileofscore(np.array(metrics_history[i],dtype = float)/np.array(metrics_history['jobs'],dtype = float),float(summed_metric_dict[i][1]))
     if current_week_metric_percentile <= 5:
